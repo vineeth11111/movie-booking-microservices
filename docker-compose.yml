@@ -1,0 +1,165 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: redis-lock-server
+    ports:
+      - "6379:6379"
+    restart: always
+    networks: 
+        - booking-network
+  # Zookeeper service
+  zookeeper:
+    image: zookeeper:3.9
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOO_CLIENT_PORT: 2181
+      ZOO_TICK_TIME: 2000
+    networks: 
+        - booking-network  
+
+  # Kafka service
+  kafka:
+    image: bitnami/kafka:3.7.0
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+    environment:
+      #KAFKA_CFG_BROKER_ID: 1
+      #KAFKA_CFG_ZOOKEEPER_CONNECT: zookeeper:2181
+      #KAFKA_CFG_LISTENERS: kafka://:9092
+      #KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      #ALLOW_PLAINTEXT_LISTENER: "yes"
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+      - ALLOW_PLAINTEXT_LISTENER=yes
+    networks: 
+        - booking-network  
+
+  # MySQL database for Keycloak
+  keycloak-db:
+    image: mysql:8
+    container_name: keycloak-db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: 1234
+      MYSQL_DATABASE: keycloak
+      MYSQL_USER: kcuser
+      MYSQL_PASSWORD: kcpass
+    ports:
+      - "3307:3306"
+    volumes:
+      - kc_mysql_data:/var/lib/mysql
+    networks: 
+        - booking-network  
+
+  # Keycloak service
+  keycloak:
+    image: quay.io/keycloak/keycloak:latest
+    container_name: keycloak
+    restart: always
+    command: start-dev
+    environment:
+      KC_DB: mysql
+      KC_DB_URL: jdbc:mysql://keycloak-db:3306/keycloak
+      KC_DB_USERNAME: kcuser
+      KC_DB_PASSWORD: kcpass
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    ports:
+      - "8080:8080"
+    depends_on:
+      - keycloak-db  
+    networks: 
+        - booking-network  
+      
+  eureka-server:
+    image: eureka_server_img
+    container_name: eureka_server_cont
+    ports:
+       - "8761:8761"
+    networks: 
+        - booking-network   
+       
+  show-service:
+    image: show_service_img
+    container_name: show_service_cont
+    ports:
+      - "9094:9094"
+    depends_on:
+      - eureka-server
+    environment:
+      - EUREKA_CLIENT_SERVICE_URL=http://eureka-server:8761/eureka
+      - SPRING_DATASOURCE_URL=jdbc:mysql://host.docker.internal:3306/showdb
+      - SPRING_DATASOURCE_USERNAME=root
+      - SPRING_DATASOURCE_PASSWORD=1234   
+    networks: 
+        - booking-network    
+
+  booking-service:
+    image: booking_service_img
+    container_name: booking_service_cont
+    ports:
+       -  "9095:9095"  
+    depends_on:
+      - eureka-server
+      - kafka
+      - redis  
+    environment:
+      -  SERVER_PORT=9095
+      -  SPRING_DATASOURCE_URL=jdbc:mysql://host.docker.internal:3306/bookingDB
+      -  SPRING_DATASOURCE_USERNAME=root
+      -  SPRING_DATASOURCE_PASSWORD=1234   
+      -  EUREKA_CLIENT_SERVICE_URL=http://eureka-server:8761/eureka  
+      -  KAFKA_PRODUCER_BOOTSTRAP_SERVER=http://kafka:9092
+      -  KAFKA_CONSUMER_BOOTSTRAP_SERVER=http://kafka:9092
+      -  REDIS_HOST=redis
+      -  REDIS_PORT=6379
+    networks: 
+        - booking-network   
+        
+  payment-service:
+    image: payment_service_img
+    container_name: payment_service_cont
+    ports:
+      -  "8083:8083"  
+    depends_on:
+      - kafka  
+    environment:
+      -  SERVER_PORT=8083
+      -  SPRING_DATASOURCE_URL=jdbc:mysql://host.docker.internal:3306/paymentdb
+      -  SPRING_DATASOURCE_USERNAME=root
+      -  SPRING_DATASOURCE_PASSWORD=1234   
+      -  EUREKA_CLIENT_SERVICE_URL=http://eureka-server:8761/eureka  
+      -  KAFKA_PRODUCER_BOOTSTRAP_SERVER=http://kafka:9092
+      -  KAFKA_CONSUMER_BOOTSTRAP_SERVER=http://kafka:9092
+    networks:
+      - booking-network 
+       
+  authentication-service:
+    image: authentication_service_img
+    container_name: authentication_service_cont 
+    ports:
+      - "8081:8081" 
+    environment:
+      - IDENTITY_ISSUER=http://keycloak:8080/realms/bookingApp
+      - EUREKA_CLIENT_SERVICE_URL=http://eureka-server:8761/eureka
+    networks:
+      - booking-network
+    
+                
+          
+      
+volumes:
+  kc_mysql_data:
+  
+networks: 
+    booking-network:
+       external: true

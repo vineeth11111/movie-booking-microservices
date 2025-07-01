@@ -1,0 +1,28 @@
+services:
+  eureka-server:
+    image: eureka_server_img
+    container_name: eureka_server_cont
+    ports:
+       - "8761:8761"
+    networks:
+      - booking-network
+      
+  show-service:
+    image: show_service_img
+    container_name: show_service_cont
+    ports:
+      - "9094:9094"
+    depends_on:
+      - eureka-server
+    networks:
+      - booking-network
+    environment:
+      - EUREKA_CLIENT_SERVICE_URL=http://eureka-server:8761/eureka
+      - SPRING_DATASOURCE_URL=jdbc:mysql://host.docker.internal:3306/showdb
+      - SPRING_DATASOURCE_USERNAME=root
+      - SPRING_DATASOURCE_PASSWORD=1234  
+      
+networks:
+  default:  
+    external:
+       name: booking-network 
